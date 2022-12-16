@@ -5,8 +5,9 @@ import ioc.di.annotation.Autowired;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
-import java.util.HashSet;
+import java.util.Arrays;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class IOCContainer {
 
@@ -17,19 +18,15 @@ public class IOCContainer {
         this.beans.forEach(this::setFields);
     }
 
-    public static IOCContainer createContainerForPackage(final String rootPackageName) {
-        final Set<Class<?>> allClassesInPackage = ClassScanner.getAllClassesInPackage(rootPackageName);
+    public static IOCContainer createContainerForPackage(final String rootPackagePrefix) {
+        final Set<Class<?>> allClassesInPackage = ClassScanner.getAllClassesInPackage(rootPackagePrefix);
         return new IOCContainer(allClassesInPackage);
     }
 
     private Set<Object> createBeans(final Set<Class<?>> classes) {
-        Set<Object> beans = new HashSet<>();
-
-        for (Class<?> clazz : classes) {
-            beans.add(createInstance(clazz));
-        }
-
-        return beans;
+        return classes.stream()
+                .map(IOCContainer::createInstance)
+                .collect(Collectors.toSet());
     }
 
     private static Object createInstance(final Class<?> clazz) {
@@ -37,43 +34,35 @@ public class IOCContainer {
             final Constructor<?> constructor = clazz.getDeclaredConstructor();
             constructor.setAccessible(true);
             return constructor.newInstance();
-        } catch(InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
+        } catch (InstantiationException | IllegalAccessException | InvocationTargetException | NoSuchMethodException e) {
             throw new RuntimeException();
         }
     }
 
     private void setFields(final Object bean) {
         final Field[] fields = bean.getClass().getDeclaredFields();
-
-        for (Field field : fields) {
-            setBeanField(bean, field);
-        }
+        Arrays.stream(fields)
+                .filter(field -> field.isAnnotationPresent(Autowired.class))
+                .forEach(field -> setBeanField(bean, field));
     }
 
     private void setBeanField(final Object bean, final Field field) {
         try {
-            injectField(bean, field);
+            injectFieldWithBean(bean, field);
         } catch (IllegalAccessException e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void injectField(final Object bean, final Field field) throws IllegalAccessException {
+    private void injectFieldWithBean(final Object bean, final Field field) throws IllegalAccessException {
         field.setAccessible(true);
-
-        if (hasInjectAnnotation(field)) {
-            field.set(bean, getBean(field.getType()));
-        }
-    }
-
-    private boolean hasInjectAnnotation(final Field field) {
-        return field.isAnnotationPresent(Autowired.class);
+        field.set(bean, getBean(field.getType()));
     }
 
     @SuppressWarnings("unchecked")
-    public <T> T getBean(final Class<T> aClass) {
+    public <T> T getBean(final Class<T> clazz) {
         return (T) beans.stream()
-                .filter(bean -> aClass.isAssignableFrom(bean.getClass()))
+                .filter(bean -> clazz.isAssignableFrom(bean.getClass()))
                 .findFirst()
                 .orElseThrow(IllegalArgumentException::new);
     }
